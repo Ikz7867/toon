@@ -1,0 +1,16 @@
+services:
+  toon:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATA_DIR: /app/data
+    volumes:
+      - toon-data:/app/data
+    restart: unless-stopped
+    stop_grace_period: 60s
+volumes:
+  toon-data:

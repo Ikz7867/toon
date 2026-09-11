@@ -1,0 +1,13 @@
+{
+  "name": "toon-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A prompt-to-video studio with a durable generation queue and real FFmpeg exports",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check.mjs"
+  }
+}
