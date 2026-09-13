@@ -8,6 +8,10 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "setup:local": "node scripts/setup-local.mjs",
+    "test:gpu": "python3 -m unittest discover -s gpu_service -p 'test_*.py' -v",
+    "gpu:probe": "node --env-file-if-exists=.env scripts/run-gpu.mjs --probe",
+    "gpu:start": "node --env-file-if-exists=.env scripts/run-gpu.mjs"
   }
 }

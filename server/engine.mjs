@@ -16,7 +16,7 @@ export class Engine {
       if (job.status !== 'running') continue;
       // A submission can be accepted remotely before its response is persisted.
       // Never blindly repeat that paid request after a process crash.
-      if (job.scenes.some(scene => scene.status === 'submitting' && !scene.handle)) {
+      if (job.scenes.some(scene => scene.status === 'submitting' && !scene.handle) && (job.providerKind ?? 'fal') !== 'local') {
         job.status = 'needs_review'; job.error = 'Submission was interrupted. Check the fal queue before starting another render; the provider may already have charged for this scene.';
       } else { job.status = 'queued'; job.stage = 'Resuming saved render'; }
       this.store.saveJob(job);
@@ -52,6 +52,7 @@ export class Engine {
     const signal = this.controller.signal;
     const directory = join(this.directory, 'renders', job.id);
     try {
+      if (job.project.scenes.some(scene => !scene.clipAsset) && (job.providerIdentity ?? job.providerKind ?? 'fal') !== (this.provider.identity ?? this.provider.kind ?? 'fal')) throw new AppError('This render belongs to a different video backend. Restore its original provider configuration before resuming.', 409);
       await mkdir(directory, { recursive: true });
       job.status = 'running'; this.save(job);
       for (let index = 0; index < job.scenes.length; index++) {
@@ -73,7 +74,7 @@ export class Engine {
               const referenceId = scene.referenceAsset || job.project.referenceAsset;
               const image = referenceId ? await referenceData(join(this.directory, 'uploads', this.store.asset(referenceId).file), job.project.aspectRatio, sceneDirectory) : null;
               state.status = 'submitting'; this.save(job);
-              state.handle = await this.provider.submit(job.project, scene, image);
+              state.handle = await this.provider.submit(job.project, scene, image, `${job.id}:${index}`);
               state.status = 'submitted'; this.save(job);
             }
             const pollStarted = Date.now();
@@ -96,7 +97,7 @@ export class Engine {
           }
         }
         await this.checkCancellation(job);
-        job.stage = `Preparing scene ${index + 1} and removing source audio`; this.save(job);
+        job.stage = `Preparing scene ${index + 1}`; this.save(job);
         await normalizeClip(source, output, job.project, scene, signal);
         state.status = 'done'; state.file = `scene-${index}.mp4`; this.save(job);
       }
@@ -110,7 +111,7 @@ export class Engine {
       this.save(job);
     } catch (error) {
       if (this.stopped) { job.status = 'running'; this.save(job); return; }
-      job.status = error.code === 'cancelled' ? 'cancelled' : job.scenes.some(scene => scene.status === 'submitting' && !scene.handle) ? 'needs_review' : 'failed';
+      job.status = error.code === 'cancelled' ? 'cancelled' : !this.provider.idempotentSubmission && job.scenes.some(scene => scene.status === 'submitting' && !scene.handle) ? 'needs_review' : 'failed';
       job.error = job.status === 'needs_review' ? 'Provider submission was not confirmed. Check the fal queue before starting another render to avoid duplicate charges.' : error.message;
       job.stage = job.status === 'cancelled' ? 'Cancelled' : 'Needs attention'; this.save(job);
     }

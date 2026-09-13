@@ -6,3 +6,8 @@ node_modules/
 .sites-runtime/
 coverage/
 *.log
+gpu-data/
+models/
+__pycache__/
+*.pyc
+.venv/

@@ -6,3 +6,7 @@ node_modules
 tests
 docs
 .sites-runtime
+gpu-data
+models
+**/__pycache__
+.venv

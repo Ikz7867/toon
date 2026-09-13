@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Store } from './store.mjs';
 import { FalProvider } from './provider.mjs';
+import { LocalProvider } from './local-provider.mjs';
 import { Engine } from './engine.mjs';
 import { Auth } from './auth.mjs';
 import { AppError, validateProject, splitStoryboard, text } from './domain.mjs';
@@ -64,8 +65,10 @@ export function createApp(options = {}) {
   const web = resolve(options.web ?? './web');
   const origin = options.origin ?? process.env.PUBLIC_ORIGIN ?? 'http://localhost:3000';
   const store = new Store(directory);
-  const provider = options.provider ?? new FalProvider(process.env.FAL_KEY);
-  const engine = new Engine(store, provider, directory, options.engineOptions);
+  const providerKind = process.env.VIDEO_PROVIDER ?? 'local';
+  if (!options.provider && !['fal', 'local'].includes(providerKind)) throw new Error('VIDEO_PROVIDER must be local or fal.');
+  const provider = options.provider ?? (providerKind === 'local' ? new LocalProvider(process.env.SELF_HOSTED_URL, process.env.SELF_HOSTED_TOKEN) : new FalProvider(process.env.FAL_KEY));
+  const engine = new Engine(store, provider, directory, { pollInterval: Number(process.env.POLL_INTERVAL_MS) || 5000, providerTimeout: Number(process.env.PROVIDER_TIMEOUT_MS) || 1800000, ...options.engineOptions });
   const auth = new Auth(options.password ?? process.env.STUDIO_PASSWORD ?? '', origin);
   const mediaReady = ffmpegAvailable();
   const plannerURL = options.plannerURL ?? process.env.OLLAMA_URL;
@@ -98,8 +101,12 @@ export function createApp(options = {}) {
       }
       auth.require(req);
       if (path === '/api/logout' && method === 'POST') return send(res, 200, { ok: true }, { 'Set-Cookie': 'toon_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
-      if (path === '/api/config' && method === 'GET') return send(res, 200, { provider: 'Wan 2.5 · fal', providerReady: provider.configured,
-        mediaReady, plannerReady: Boolean(plannerURL && plannerModel), maxScenes: 8, durations: [5, 10], audioModes: ['silent', 'source'] });
+      if (path === '/api/config' && method === 'GET') {
+        const health = provider.health ? await provider.health() : null;
+        return send(res, 200, { provider: provider.name ?? 'Wan 2.5 · fal', providerKind: provider.kind ?? 'fal', providerPaid: provider.paid !== false,
+          providerConfigured: provider.configured, providerReady: health ? health.ready === true : provider.configured, providerReason: health?.reason ?? '',
+          mediaReady, plannerReady: Boolean(plannerURL && plannerModel), maxScenes: 8, durations: provider.kind === 'local' ? [5] : [5, 10], audioModes: ['silent', 'source'] });
+      }
       if (path === '/api/projects' && method === 'GET') return send(res, 200, store.projects());
       if (path === '/api/characters' && method === 'GET') return send(res, 200, store.characters());
       if (path === '/api/characters' && method === 'POST') {
@@ -129,10 +136,15 @@ export function createApp(options = {}) {
         const project = store.project(match[1]);
         const body = await jsonBody(req);
         if (!mediaReady) throw new AppError('Install FFmpeg and FFprobe on the engine server first.', 503);
-        if (!provider.configured && project.scenes.some(scene => !scene.clipAsset)) throw new AppError('Set FAL_KEY on the server to generate new video. Imported clips can be exported without it.', 503, 'provider_not_configured');
-        if (project.scenes.some(scene => !scene.clipAsset) && body.confirmProviderUsage !== true) throw new AppError('Confirm that this render uses your provider credits.', 400);
+        const needsGeneration = project.scenes.some(scene => !scene.clipAsset);
+        if (!provider.configured && needsGeneration) throw new AppError(provider.kind === 'local' ? 'Connect your GPU service with SELF_HOSTED_URL and SELF_HOSTED_TOKEN. No fal key is needed.' : 'Set FAL_KEY on the server to generate new video. Imported clips can be exported without it.', 503, 'provider_not_configured');
+        if (needsGeneration) {
+          provider.validate?.(project);
+          if (provider.health) { const health = await provider.health(); if (health.ready !== true) throw new AppError(health.reason || 'GPU service is not ready.', 503); }
+        }
+        if (needsGeneration && provider.paid !== false && body.confirmProviderUsage !== true) throw new AppError('Confirm that this render uses your provider credits.', 400);
         const key = text(req.headers['idempotency-key'], 'Idempotency key', 100, true);
-        const job = store.addJob(project, key); engine.tick(); return send(res, 202, publicJob(job));
+        const job = store.addJob(project, key, provider.kind ?? 'fal', provider.identity ?? 'fal'); engine.tick(); return send(res, 202, publicJob(job));
       }
       if (path === '/api/jobs' && method === 'GET') return send(res, 200, store.jobs().map(publicJob));
       if ((match = /^\/api\/jobs\/([a-f0-9-]{36})(?:\/(cancel|resume|download|captions|scene-\d+))?$/.exec(path))) {
@@ -147,6 +159,7 @@ export function createApp(options = {}) {
         if (action === 'resume' && method === 'POST') {
           if (job.status !== 'failed') throw new AppError('Only a failed render can be resumed. Unconfirmed submissions need a provider queue check.', 409);
           if (store.jobs(job.projectId).some(j => ['queued', 'running'].includes(j.status))) throw new AppError('Another render is already active for this project.', 409);
+          await provider.resume?.(job);
           job.status = 'queued'; job.cancelRequested = false; job.error = null; store.saveJob(job); engine.tick(); return send(res, 202, publicJob(job));
         }
         if (['GET', 'HEAD'].includes(method)) {

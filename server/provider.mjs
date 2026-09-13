@@ -19,6 +19,7 @@ export function mediaURL(value) {
   return url.href;
 }
 export class FalProvider {
+  kind = 'fal'; identity = 'fal'; name = 'Wan 2.5 · fal'; paid = true;
   constructor(key, fetcher = fetch) { this.key = key; this.fetcher = fetcher; }
   get configured() { return Boolean(this.key); }
   async request(url, method = 'GET', body) {

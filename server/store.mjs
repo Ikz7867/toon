@@ -33,11 +33,11 @@ export class Store {
     this.db.prepare('INSERT INTO jobs VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,data=excluded.data').run(job.id, job.projectId, job.status, JSON.stringify(job), job.created);
     return job;
   }
-  addJob(project, key) {
+  addJob(project, key, providerKind = 'fal', providerIdentity = providerKind) {
     const previous = this.jobs(project.id).find(job => job.idempotencyKey === key);
     if (previous) return previous;
     if (this.jobs(project.id).some(job => ['queued', 'running'].includes(job.status))) throw new AppError('This project already has an active render.', 409);
-    const job = { id: randomUUID(), projectId: project.id, project: structuredClone(project), idempotencyKey: key,
+    const job = { id: randomUUID(), projectId: project.id, project: structuredClone(project), idempotencyKey: key, providerKind, providerIdentity,
       status: 'queued', stage: 'Waiting to start', progress: 0, cancelRequested: false,
       scenes: project.scenes.map(() => ({ status: 'pending' })), created: new Date().toISOString() };
     return this.saveJob(job);

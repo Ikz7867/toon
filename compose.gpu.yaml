@@ -1,0 +1,41 @@
+# Combine with compose.yaml. The GPU API is private to the container network.
+services:
+  toon:
+    environment:
+      VIDEO_PROVIDER: local
+      SELF_HOSTED_URL: http://gpu:8188
+      SELF_HOSTED_TOKEN: ${SELF_HOSTED_TOKEN:?Run npm run setup:local first}
+      PROVIDER_TIMEOUT_MS: 7200000
+    depends_on:
+      - gpu
+  gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    environment:
+      SELF_HOSTED_TOKEN: ${SELF_HOSTED_TOKEN:?Run npm run setup:local first}
+      WAN_OFFLOAD: ${WAN_OFFLOAD:-model}
+      WAN_STEPS: ${WAN_STEPS:-50}
+    volumes:
+      - gpu-models:/models
+      - gpu-jobs:/app/gpu-data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    stop_grace_period: 60s
+  model-download:
+    profiles: [setup]
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    command: [python, -m, gpu_service.download_model]
+    volumes:
+      - gpu-models:/models
+volumes:
+  gpu-models:
+  gpu-jobs:

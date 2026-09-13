@@ -16,3 +16,4 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
       - run: npm run check
       - run: npm test
+      - run: python3 -m unittest discover -s gpu_service -p 'test_*.py' -v

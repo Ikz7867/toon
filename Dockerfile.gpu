@@ -1,0 +1,11 @@
+FROM python:3.11-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libgomp1 && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
+COPY gpu_service/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+WORKDIR /app
+COPY gpu_service /app/gpu_service
+RUN useradd --uid 10001 --create-home worker && mkdir -p /app/gpu-data /models && chown -R worker:worker /app /models
+USER worker
+ENV GPU_HOST=0.0.0.0 GPU_PORT=8188 GPU_DATA_DIR=/app/gpu-data WAN_MODEL_DIR=/models/wan2.2-ti2v-5b HF_HUB_DISABLE_TELEMETRY=1 PYTHONUNBUFFERED=1
+CMD ["python", "-m", "gpu_service.service"]
